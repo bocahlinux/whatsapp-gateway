@@ -151,16 +151,5 @@ Aplikasi akan berjalan di `http://localhost:8181` (atau port yang Anda tentukan)
 
 ---
 
-## Kontak & Dukungan
-
-Jika Anda memiliki pertanyaan atau ingin mendapatkan update terbaru, hubungi kami melalui:
-
-- **WhatsApp Channel**: [Gabung Saluran](https://www.whatsapp.com/channel/0029VagADOLLSmbaxFNswH1m)
-- **Sosial Media (Threads, FB, IG)**: [@kang.potokopi](https://instagram.com/kang.potokopi)
-- **Email**: support@antidonasi.web.id
-- **Author Website**: [idlanyor.web.id](https://idlanyor.web.id)
-
----
-
 ##  Lisensi
 Distributed under the ISC License. Lihat `LICENSE` untuk informasi lebih lanjut.
