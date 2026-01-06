@@ -17,6 +17,7 @@ export const config = {
     session: {
         secret: process.env.SESSION_SECRET || 'default-secret',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        secureCookie: process.env.COOKIE_SECURE === 'true', // Only use secure cookies if explicitly enabled (requires HTTPS)
     },
     whatsapp: {
         keepAliveInterval: 25000,

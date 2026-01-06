@@ -73,7 +73,8 @@ router.post('/register', async (req, res) => {
 
         res.cookie('auth-token', token, {
             httpOnly: true,
-            secure: config.node_env === 'production',
+            secure: config.session.secureCookie, // Set COOKIE_SECURE=true in .env if using HTTPS
+            sameSite: 'lax',
             maxAge: config.session.maxAge,
         });
 
@@ -112,7 +113,8 @@ router.post('/login', async (req, res) => {
 
         res.cookie('auth-token', token, {
             httpOnly: true,
-            secure: config.node_env === 'production',
+            secure: config.session.secureCookie, // Set COOKIE_SECURE=true in .env if using HTTPS
+            sameSite: 'lax',
             maxAge: config.session.maxAge,
         });
 
@@ -125,7 +127,11 @@ router.post('/login', async (req, res) => {
 
 // Handle logout
 router.post('/logout-user', (req, res) => {
-    res.clearCookie('auth-token');
+    res.clearCookie('auth-token', {
+        httpOnly: true,
+        secure: config.session.secureCookie,
+        sameSite: 'lax'
+    });
     res.redirect('/login');
 });
 
