@@ -55,15 +55,30 @@ Mengirim pesan ke group WhatsApp.
 
 ## Cara Mendapatkan Group ID
 
-Group ID dapat diperoleh dari:
+### Metode 1: Halaman Groups (Termudah) ✅
 
-1. **Dashboard** - Group ID akan muncul di daftar chat dengan format `xxxxxxxxxxxx@g.us`
-2. **Webhook** - Saat menerima pesan dari group, field `chatJid` akan berisi group ID
-3. **Database** - Dari collection `Message`, lihat field `chatJid` untuk pesan dari group
+1. Login ke dashboard WhatsApp Gateway
+2. Klik menu **"Groups"** di sidebar
+3. Anda akan melihat semua group yang Anda ikuti
+4. Setiap group menampilkan:
+   - Nama group
+   - Group ID (format: `xxxxxxxxxxxx@g.us`)
+   - Jumlah members
+   - Deskripsi group
+5. Klik tombol **"Copy"** untuk copy Group ID ke clipboard
+6. Atau gunakan tombol **"Kirim Pesan"** untuk langsung test kirim pesan
 
-Group ID memiliki format: `[angka]@g.us`
+### Metode 2: Webhook
 
-Contoh: `120363123456789012@g.us`
+Saat menerima pesan dari group, field `chatJid` akan berisi group ID.
+
+### Metode 3: Database
+
+Dari collection `Message`, lihat field `chatJid` untuk pesan dari group.
+
+**Format Group ID:** `[angka]@g.us`
+
+**Contoh:** `120363123456789012@g.us`
 
 ## Contoh Penggunaan
 
