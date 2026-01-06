@@ -303,22 +303,22 @@ class WhatsAppService {
      */
     async sendMessage(userId, to, message, replyToId = null) {
         const session = await this.ensureSession(userId);
-        
+
         if (!session.isConnected) {
             throw new Error('WhatsApp not connected');
         }
 
         const phone = to.includes('@') ? to : `${to}@s.whatsapp.net`;
-        
+
         let quotedInfo = undefined;
         let quotedDbRecord = null;
-        
+
         if (replyToId) {
             const data = await Message.findOne({
                 _id: replyToId,
                 userId: userId
             });
-                
+
             if (data) {
                 quotedDbRecord = data;
                 quotedInfo = {
@@ -334,11 +334,86 @@ class WhatsAppService {
         }
 
         const result = await session.sock.sendMessage(phone, { text: message }, { quoted: quotedInfo });
-        
+
         // Record outgoing message
         const recordedOutgoing = await MessageService.recordMessage({
             userId,
             chatJid: phone,
+            sender: 'me',
+            text: message,
+            direction: 'out',
+            timestamp: Date.now(),
+            stanzaId: result.key.id,
+            rawMessage: result.message,
+            replyToId: replyToId,
+            quotedText: quotedDbRecord?.message,
+            quotedSender: quotedDbRecord?.sender,
+            senderJid: session.sock.user.id.replace(/:.*$/, '@s.whatsapp.net')
+        });
+
+        if (recordedOutgoing) {
+            this.io.to(userId).emit('new_message', {
+                ...recordedOutgoing.toObject(),
+                id: recordedOutgoing._id,
+                chat_jid: recordedOutgoing.chatJid
+            });
+            if (this.webhookService && this.appSettings.webhook_toggle_message_out !== 'false') {
+                this.webhookService.send('message.out', {
+                    userId,
+                    id: recordedOutgoing._id,
+                    chatJid: recordedOutgoing.chatJid,
+                    sender: recordedOutgoing.sender,
+                    text: recordedOutgoing.message,
+                    timestamp: recordedOutgoing.timestamp
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Send a message to a WhatsApp group
+     */
+    async sendGroupMessage(userId, groupId, message, replyToId = null) {
+        const session = await this.ensureSession(userId);
+
+        if (!session.isConnected) {
+            throw new Error('WhatsApp not connected');
+        }
+
+        // Ensure groupId has proper format
+        const groupJid = groupId.includes('@g.us') ? groupId : `${groupId}@g.us`;
+
+        let quotedInfo = undefined;
+        let quotedDbRecord = null;
+
+        if (replyToId) {
+            const data = await Message.findOne({
+                _id: replyToId,
+                userId: userId
+            });
+
+            if (data) {
+                quotedDbRecord = data;
+                quotedInfo = {
+                    key: {
+                        remoteJid: data.chatJid,
+                        id: data.stanzaId,
+                        fromMe: data.direction === 'out',
+                        participant: data.senderJid,
+                    },
+                    message: data.rawMessage
+                };
+            }
+        }
+
+        const result = await session.sock.sendMessage(groupJid, { text: message }, { quoted: quotedInfo });
+
+        // Record outgoing group message
+        const recordedOutgoing = await MessageService.recordMessage({
+            userId,
+            chatJid: groupJid,
             sender: 'me',
             text: message,
             direction: 'out',

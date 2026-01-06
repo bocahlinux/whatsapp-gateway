@@ -176,11 +176,42 @@ function validateLoginData(body) {
     };
 }
 
+/**
+ * Validate group message request
+ */
+function validateGroupMessageRequest(body) {
+    const { groupId, message } = body;
+    const errors = [];
+
+    if (!groupId || typeof groupId !== 'string' || groupId.trim().length === 0) {
+        errors.push('Field "groupId" is required and must be a non-empty string');
+    }
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+        errors.push('Field "message" is required and must be a non-empty string');
+    }
+
+    if (message && message.length > 4096) {
+        errors.push('Message length cannot exceed 4096 characters');
+    }
+
+    // Validate groupId format (should end with @g.us)
+    if (groupId && !groupId.includes('@g.us')) {
+        errors.push('Invalid groupId format. Group ID should be in format: xxxxxxxxxxxx@g.us');
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}
+
 export {
     validateSendMessageRequest,
     validateBulkMessageRequest,
     validateContactData,
     validateAutoReplyData,
     validateRegistrationData,
-    validateLoginData
+    validateLoginData,
+    validateGroupMessageRequest
 };
