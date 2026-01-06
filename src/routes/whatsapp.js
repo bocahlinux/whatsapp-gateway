@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { isAuthenticatedOrApiKey, getEffectiveUserId, isAuthenticated } from '../middleware/auth.js';
 import ContactService from '../services/ContactService.js';
 import MessageService from '../services/MessageService.js';
+import { validateGroupMessageRequest } from '../utils/validation.js';
 
 const router = Router();
 
@@ -26,7 +27,7 @@ router.get('/status', isAuthenticatedOrApiKey, async (req, res) => {
 // Send a single message
 router.post('/send-message', isAuthenticatedOrApiKey, async (req, res) => {
     const { to, message, reply_to_id } = req.body;
-    
+
     if (!to || !message) {
         return res.status(400).json({
             error: 'Missing required fields',
@@ -37,9 +38,9 @@ router.post('/send-message', isAuthenticatedOrApiKey, async (req, res) => {
     try {
         const userId = getEffectiveUserId(req);
         const whatsappService = req.app.get('whatsappService');
-        
+
         const result = await whatsappService.sendMessage(userId, to, message, reply_to_id);
-        
+
         res.json({
             success: true,
             messageId: result.key.id,
@@ -55,7 +56,39 @@ router.post('/send-message', isAuthenticatedOrApiKey, async (req, res) => {
     }
 });
 
+// Send a message to a group
+router.post('/send-group-message', isAuthenticatedOrApiKey, async (req, res) => {
+    const { groupId, message, reply_to_id } = req.body;
 
+    // Validate request
+    const validation = validateGroupMessageRequest(req.body);
+    if (!validation.isValid) {
+        return res.status(400).json({
+            error: 'Validation failed',
+            details: validation.errors
+        });
+    }
+
+    try {
+        const userId = getEffectiveUserId(req);
+        const whatsappService = req.app.get('whatsappService');
+
+        const result = await whatsappService.sendGroupMessage(userId, groupId, message, reply_to_id);
+
+        res.json({
+            success: true,
+            messageId: result.key.id,
+            groupId: groupId,
+            message: message
+        });
+    } catch (error) {
+        console.error('Error sending group message:', error);
+        res.status(500).json({
+            error: 'Failed to send group message',
+            details: error.message
+        });
+    }
+});
 
 // Logout from WhatsApp
 router.post('/logout', isAuthenticatedOrApiKey, async (req, res) => {
