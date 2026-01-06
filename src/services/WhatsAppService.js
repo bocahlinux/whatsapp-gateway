@@ -484,12 +484,47 @@ class WhatsAppService {
         if (!session) {
             return { status: 'disconnected', connected: false, qr: null };
         }
-        
+
         return {
             status: session.state,
             connected: session.isConnected,
             qr: session.qr
         };
+    }
+
+    /**
+     * Get list of groups the user is part of
+     */
+    async getGroups(userId) {
+        const session = await this.ensureSession(userId);
+
+        if (!session.isConnected) {
+            throw new Error('WhatsApp not connected');
+        }
+
+        try {
+            // Get all groups from Baileys
+            const groups = await session.sock.groupFetchAllParticipating();
+
+            // Transform to array with useful information
+            const groupList = Object.values(groups).map(group => ({
+                id: group.id,
+                name: group.subject,
+                description: group.desc || '',
+                owner: group.owner,
+                participants: group.participants?.length || 0,
+                creation: group.creation,
+                participantsList: group.participants || []
+            }));
+
+            // Sort by name
+            groupList.sort((a, b) => a.name.localeCompare(b.name));
+
+            return groupList;
+        } catch (error) {
+            console.error('Error fetching groups:', error);
+            throw new Error('Failed to fetch groups: ' + error.message);
+        }
     }
 
     /**
