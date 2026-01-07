@@ -263,6 +263,7 @@ class WhatsAppService {
             // Check if bot is mentioned
             // Method 1: Direct JID match (including all bot JIDs in group)
             let isBotMentioned = mentionedJids.some(jid => botJidsInGroup.includes(jid));
+            let detectionMethod = isBotMentioned ? 'Method 1: Direct JID match' : null;
 
             // Method 2: Phone number match (fallback)
             if (!isBotMentioned) {
@@ -274,10 +275,33 @@ class WhatsAppService {
                     }
                     return match;
                 });
+                if (isBotMentioned) detectionMethod = 'Method 2: Phone number match';
+            }
+
+            // Method 3: Check if this is a reply to bot's message
+            if (!isBotMentioned && quotedSender) {
+                const quotedNumber = quotedSender.split('@')[0].split(':')[0];
+                if (quotedNumber === botPhoneNumber) {
+                    isBotMentioned = true;
+                    detectionMethod = 'Method 3: Reply to bot message';
+                }
+            }
+
+            // Method 4: Force detection for linked devices (WORKAROUND for Baileys bug)
+            // If there's ANY mention in group and bot is linked device, assume it's for bot
+            if (!isBotMentioned && isGroupMessage && mentionedJids.length > 0 && sock.user.id.includes(':')) {
+                // This is a workaround for linked device limitation in Baileys
+                // Enable by setting FORCE_MENTION_DETECTION=true in .env
+                const forceMentionDetection = process.env.FORCE_MENTION_DETECTION === 'true';
+                if (forceMentionDetection) {
+                    isBotMentioned = true;
+                    detectionMethod = 'Method 4: Force detection (linked device workaround)';
+                }
             }
 
             if (mentionedJids.length > 0) {
                 console.log('isBotMentioned:', isBotMentioned);
+                console.log('Detection Method:', detectionMethod || 'No match');
                 console.log('=== END DEBUG ===');
             }
 
