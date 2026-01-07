@@ -69,6 +69,7 @@ Dikirim ketika bot di-mention di group.
     "senderJid": "6281234567890@s.whatsapp.net",
     "text": "@Bot halo, apa kabar?",
     "timestamp": 1704614400000,
+    "isBotMentioned": true,
     "mentionedJids": [
       "6289876543210@s.whatsapp.net"
     ]

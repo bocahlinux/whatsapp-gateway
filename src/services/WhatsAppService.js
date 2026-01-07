@@ -390,6 +390,7 @@ class WhatsAppService {
                             senderJid: recordedMessage.senderJid,
                             text: recordedMessage.message,
                             timestamp: recordedMessage.timestamp,
+                            isBotMentioned: true,
                             mentionedJids: mentionedJids
                         });
                     }
