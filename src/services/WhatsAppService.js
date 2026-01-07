@@ -188,7 +188,10 @@ class WhatsAppService {
      */
     async handleIncomingMessage(messageUpdate, userId, sock) {
         const message = messageUpdate.messages[0];
-        
+
+        // Get session to access botAlternativeJids
+        const session = this.sessions.get(String(userId));
+
         if (!message.key.fromMe && messageUpdate.type === 'notify') {
             const messageText = message.message?.conversation || 
                              message.message?.extendedTextMessage?.text || '';
