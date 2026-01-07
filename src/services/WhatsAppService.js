@@ -251,13 +251,21 @@ class WhatsAppService {
 
             // Debug logging for mention detection
             if (mentionedJids.length > 0) {
-                console.log('=== MENTION DETECTION DEBUG ===');
+                console.log('\n=== MENTION DETECTION DEBUG ===');
                 console.log('Bot JID:', sock.user.id);
                 console.log('Bot Phone Number:', botPhoneNumber);
+                console.log('Is Linked Device:', sock.user.id.includes(':'));
                 console.log('Bot JIDs in Group:', botJidsInGroup);
                 console.log('All Participants in Group:', allParticipantJids);
-                console.log('Mentioned JIDs:', mentionedJids);
-                console.log('Mentioned Numbers:', mentionedJids.map(jid => jid.split('@')[0].split(':')[0]));
+                console.log('\n--- Mentioned JIDs Analysis ---');
+                mentionedJids.forEach((jid, index) => {
+                    const extractedNumber = jid.split('@')[0].split(':')[0];
+                    const domain = jid.split('@')[1];
+                    console.log(`[${index}] Raw: ${jid}`);
+                    console.log(`    Number: ${extractedNumber}`);
+                    console.log(`    Domain: ${domain}`);
+                    console.log(`    Matches Bot: ${extractedNumber === botPhoneNumber}`);
+                });
             }
 
             // Check if bot is mentioned
@@ -265,15 +273,11 @@ class WhatsAppService {
             let isBotMentioned = mentionedJids.some(jid => botJidsInGroup.includes(jid));
             let detectionMethod = isBotMentioned ? 'Method 1: Direct JID match' : null;
 
-            // Method 2: Phone number match (fallback)
+            // Method 2: Phone number match (fallback for different JID formats)
             if (!isBotMentioned) {
                 isBotMentioned = mentionedJids.some(jid => {
                     const mentionedNumber = jid.split('@')[0].split(':')[0];
-                    const match = mentionedNumber === botPhoneNumber;
-                    if (mentionedJids.length > 0) {
-                        console.log(`Comparing: "${mentionedNumber}" === "${botPhoneNumber}" -> ${match}`);
-                    }
-                    return match;
+                    return mentionedNumber === botPhoneNumber;
                 });
                 if (isBotMentioned) detectionMethod = 'Method 2: Phone number match';
             }
@@ -288,21 +292,34 @@ class WhatsAppService {
             }
 
             // Method 4: Force detection for linked devices (WORKAROUND for Baileys bug)
-            // If there's ANY mention in group and bot is linked device, assume it's for bot
+            // More lenient matching for linked devices where standard detection fails
             if (!isBotMentioned && isGroupMessage && mentionedJids.length > 0 && sock.user.id.includes(':')) {
                 // This is a workaround for linked device limitation in Baileys
                 // Enable by setting FORCE_MENTION_DETECTION=true in .env
                 const forceMentionDetection = process.env.FORCE_MENTION_DETECTION === 'true';
                 if (forceMentionDetection) {
-                    isBotMentioned = true;
-                    detectionMethod = 'Method 4: Force detection (linked device workaround)';
+                    // Check if any mentioned JID contains the bot's phone number
+                    // This handles cases where JID format is unexpected (e.g., @lid format)
+                    isBotMentioned = mentionedJids.some(jid => {
+                        const mentionedNumber = jid.split('@')[0].split(':')[0];
+                        const match = mentionedNumber === botPhoneNumber;
+                        if (match) {
+                            console.log(`Method 4 matched: "${mentionedNumber}" === "${botPhoneNumber}"`);
+                        }
+                        return match;
+                    });
+
+                    if (isBotMentioned) {
+                        detectionMethod = 'Method 4: Force detection (linked device workaround)';
+                    }
                 }
             }
 
             if (mentionedJids.length > 0) {
+                console.log('\n--- Detection Result ---');
                 console.log('isBotMentioned:', isBotMentioned);
                 console.log('Detection Method:', detectionMethod || 'No match');
-                console.log('=== END DEBUG ===');
+                console.log('=== END DEBUG ===\n');
             }
 
             // Record incoming message

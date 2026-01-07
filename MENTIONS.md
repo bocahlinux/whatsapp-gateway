@@ -452,6 +452,40 @@ use whatsapp-webhook
 db.messages.findOne({ isMention: true })
 ```
 
+### Mention Detection False Positive (Deteksi Semua Mention)
+
+**Masalah:**
+`isBotMentioned` return `true` meskipun yang di-tag bukan bot.
+
+**Penyebab:**
+Jika `FORCE_MENTION_DETECTION=true` diaktifkan, sistem versi lama menganggap SEMUA mention di group adalah untuk bot (bug sudah diperbaiki).
+
+**Solusi:**
+1. Update ke versi terbaru (sudah include fix)
+2. Restart WhatsApp Gateway
+3. Cek logs untuk melihat mention detection yang lebih detail
+
+**Verifikasi Fix:**
+Logs baru akan menampilkan analisis detail:
+```
+=== MENTION DETECTION DEBUG ===
+Bot Phone Number: 6287775760675
+Is Linked Device: true
+
+--- Mentioned JIDs Analysis ---
+[0] Raw: 6281234567890@s.whatsapp.net
+    Number: 6281234567890
+    Domain: s.whatsapp.net
+    Matches Bot: false
+
+--- Detection Result ---
+isBotMentioned: false
+Detection Method: No match
+```
+
+**Debug Lebih Lanjut:**
+Jika masih bermasalah, cek logs dan kirim output debug ke developer.
+
 ---
 
 ## 📚 API Reference
