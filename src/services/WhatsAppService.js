@@ -214,8 +214,16 @@ class WhatsAppService {
 
             // Handle mentions
             const mentionedJids = contextInfo?.mentionedJid || [];
-            const botJid = sock.user.id.replace(/:.*$/, '@s.whatsapp.net');
-            const isBotMentioned = mentionedJids.includes(botJid);
+
+            // Extract bot phone number (without suffix)
+            const botPhoneNumber = sock.user.id.split('@')[0].split(':')[0];
+
+            // Check if bot is mentioned (support both @s.whatsapp.net and @lid formats)
+            const isBotMentioned = mentionedJids.some(jid => {
+                const mentionedNumber = jid.split('@')[0];
+                return mentionedNumber === botPhoneNumber;
+            });
+
             const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
 
             // Record incoming message
