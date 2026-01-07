@@ -218,11 +218,29 @@ class WhatsAppService {
             // Extract bot phone number (without suffix)
             const botPhoneNumber = sock.user.id.split('@')[0].split(':')[0];
 
+            // Debug logging for mention detection
+            if (mentionedJids.length > 0) {
+                console.log('=== MENTION DETECTION DEBUG ===');
+                console.log('Bot JID:', sock.user.id);
+                console.log('Bot Phone Number:', botPhoneNumber);
+                console.log('Mentioned JIDs:', mentionedJids);
+                console.log('Mentioned Numbers:', mentionedJids.map(jid => jid.split('@')[0]));
+            }
+
             // Check if bot is mentioned (support both @s.whatsapp.net and @lid formats)
             const isBotMentioned = mentionedJids.some(jid => {
                 const mentionedNumber = jid.split('@')[0];
-                return mentionedNumber === botPhoneNumber;
+                const match = mentionedNumber === botPhoneNumber;
+                if (mentionedJids.length > 0) {
+                    console.log(`Comparing: "${mentionedNumber}" === "${botPhoneNumber}" -> ${match}`);
+                }
+                return match;
             });
+
+            if (mentionedJids.length > 0) {
+                console.log('isBotMentioned:', isBotMentioned);
+                console.log('=== END DEBUG ===');
+            }
 
             const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
 
