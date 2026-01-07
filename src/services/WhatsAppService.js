@@ -221,9 +221,17 @@ class WhatsAppService {
 
             // For group messages, also check group participants to find bot's JID in group
             let botJidsInGroup = [sock.user.id];
+            let allParticipantJids = [];
             if (isGroupMessage) {
                 try {
                     const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
+
+                    // Store all participant JIDs for debugging
+                    allParticipantJids = groupMetadata.participants.map(p => ({
+                        id: p.id,
+                        number: p.id.split('@')[0].split(':')[0]
+                    }));
+
                     // Find all JIDs that match bot phone number
                     botJidsInGroup = groupMetadata.participants
                         .filter(p => {
@@ -231,6 +239,11 @@ class WhatsAppService {
                             return participantNumber === botPhoneNumber;
                         })
                         .map(p => p.id);
+
+                    // If not found, add bot's current JID as fallback
+                    if (botJidsInGroup.length === 0) {
+                        botJidsInGroup = [sock.user.id];
+                    }
                 } catch (error) {
                     console.log('Could not fetch group metadata for mention check:', error.message);
                 }
@@ -242,6 +255,7 @@ class WhatsAppService {
                 console.log('Bot JID:', sock.user.id);
                 console.log('Bot Phone Number:', botPhoneNumber);
                 console.log('Bot JIDs in Group:', botJidsInGroup);
+                console.log('All Participants in Group:', allParticipantJids);
                 console.log('Mentioned JIDs:', mentionedJids);
                 console.log('Mentioned Numbers:', mentionedJids.map(jid => jid.split('@')[0].split(':')[0]));
             }
