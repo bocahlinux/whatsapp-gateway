@@ -197,20 +197,26 @@ class WhatsAppService {
             let quotedText = null;
             let quotedSender = null;
             let replyToId = null;
-            
+
             if (contextInfo?.quotedMessage) {
-                quotedText = contextInfo.quotedMessage.conversation || 
+                quotedText = contextInfo.quotedMessage.conversation ||
                            contextInfo.quotedMessage.extendedTextMessage?.text || '...';
                 quotedSender = contextInfo.participant;
-                
+
                 // Find the original message ID in database
                 const repliedToMsg = await Message.findOne({
                     stanzaId: contextInfo.stanzaId,
                     userId: userId
                 });
-                
+
                 if (repliedToMsg) replyToId = repliedToMsg._id;
             }
+
+            // Handle mentions
+            const mentionedJids = contextInfo?.mentionedJid || [];
+            const botJid = sock.user.id.replace(/:.*$/, '@s.whatsapp.net');
+            const isBotMentioned = mentionedJids.includes(botJid);
+            const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
 
             // Record incoming message
             const recordedMessage = await MessageService.recordMessage({
@@ -225,15 +231,20 @@ class WhatsAppService {
                 rawMessage: message.message,
                 replyToId: replyToId,
                 quotedText: quotedText,
-                quotedSender: quotedSender
+                quotedSender: quotedSender,
+                isMention: isBotMentioned,
+                mentionedJids: mentionedJids
             });
 
             if (recordedMessage) {
                 this.io.to(userId).emit('new_message', {
                     ...recordedMessage.toObject(),
                     id: recordedMessage._id,
-                    chat_jid: recordedMessage.chatJid
+                    chat_jid: recordedMessage.chatJid,
+                    is_mention: isBotMentioned
                 });
+
+                // Send webhook for regular message
                 if (this.webhookService && this.appSettings.webhook_toggle_message_in !== 'false') {
                     this.webhookService.send('message.in', {
                         userId,
@@ -241,33 +252,58 @@ class WhatsAppService {
                         chatJid: recordedMessage.chatJid,
                         sender: recordedMessage.sender,
                         text: recordedMessage.message,
-                        timestamp: recordedMessage.timestamp
+                        timestamp: recordedMessage.timestamp,
+                        isMention: isBotMentioned,
+                        mentionedJids: mentionedJids
                     });
+                }
+
+                // Send special webhook event if bot is mentioned in group
+                if (isBotMentioned && isGroupMessage) {
+                    if (this.webhookService && this.appSettings.webhook_toggle_message_in !== 'false') {
+                        this.webhookService.send('mention', {
+                            userId,
+                            id: recordedMessage._id,
+                            chatJid: recordedMessage.chatJid,
+                            groupName: message.key.remoteJid,
+                            sender: recordedMessage.sender,
+                            senderJid: recordedMessage.senderJid,
+                            text: recordedMessage.message,
+                            timestamp: recordedMessage.timestamp,
+                            mentionedJids: mentionedJids
+                        });
+                    }
                 }
             }
 
-            // Handle auto-reply
-            await this.handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender);
+            // Handle auto-reply (including mention-specific replies)
+            await this.handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender, isBotMentioned, isGroupMessage);
         }
     }
 
     /**
      * Handle auto-reply logic
      */
-    async handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender) {
+    async handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender, isBotMentioned = false, isGroupMessage = false) {
         const autoReplyEnabled = this.appSettings.auto_reply_enabled !== 'false';
-        
-        if (autoReplyEnabled && !message.key.remoteJid.endsWith('@g.us') && messageText) {
+
+        // Auto-reply conditions:
+        // 1. For private messages (NOT group): reply if keyword matches
+        // 2. For group messages: ONLY reply if bot is mentioned AND keyword matches
+        const shouldProcessAutoReply = autoReplyEnabled && messageText &&
+            (!isGroupMessage || (isGroupMessage && isBotMentioned));
+
+        if (shouldProcessAutoReply) {
             const lowerText = messageText.trim().toLowerCase();
-            const rule = this.autoReplies.find(r => 
-                r.enabled && 
+            const rule = this.autoReplies.find(r =>
+                r.enabled &&
                 lowerText.includes(String(r.keyword || '').toLowerCase().trim())
             );
-            
+
             if (rule) {
                 try {
                     const result = await sock.sendMessage(message.key.remoteJid, { text: rule.reply });
-                    
+
                     // Record auto-reply message
                     const recordedReply = await MessageService.recordMessage({
                         userId,
