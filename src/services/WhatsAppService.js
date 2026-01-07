@@ -214,35 +214,58 @@ class WhatsAppService {
 
             // Handle mentions
             const mentionedJids = contextInfo?.mentionedJid || [];
+            const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
 
             // Extract bot phone number (without suffix)
             const botPhoneNumber = sock.user.id.split('@')[0].split(':')[0];
+
+            // For group messages, also check group participants to find bot's JID in group
+            let botJidsInGroup = [sock.user.id];
+            if (isGroupMessage) {
+                try {
+                    const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
+                    // Find all JIDs that match bot phone number
+                    botJidsInGroup = groupMetadata.participants
+                        .filter(p => {
+                            const participantNumber = p.id.split('@')[0].split(':')[0];
+                            return participantNumber === botPhoneNumber;
+                        })
+                        .map(p => p.id);
+                } catch (error) {
+                    console.log('Could not fetch group metadata for mention check:', error.message);
+                }
+            }
 
             // Debug logging for mention detection
             if (mentionedJids.length > 0) {
                 console.log('=== MENTION DETECTION DEBUG ===');
                 console.log('Bot JID:', sock.user.id);
                 console.log('Bot Phone Number:', botPhoneNumber);
+                console.log('Bot JIDs in Group:', botJidsInGroup);
                 console.log('Mentioned JIDs:', mentionedJids);
-                console.log('Mentioned Numbers:', mentionedJids.map(jid => jid.split('@')[0]));
+                console.log('Mentioned Numbers:', mentionedJids.map(jid => jid.split('@')[0].split(':')[0]));
             }
 
-            // Check if bot is mentioned (support both @s.whatsapp.net and @lid formats)
-            const isBotMentioned = mentionedJids.some(jid => {
-                const mentionedNumber = jid.split('@')[0];
-                const match = mentionedNumber === botPhoneNumber;
-                if (mentionedJids.length > 0) {
-                    console.log(`Comparing: "${mentionedNumber}" === "${botPhoneNumber}" -> ${match}`);
-                }
-                return match;
-            });
+            // Check if bot is mentioned
+            // Method 1: Direct JID match (including all bot JIDs in group)
+            let isBotMentioned = mentionedJids.some(jid => botJidsInGroup.includes(jid));
+
+            // Method 2: Phone number match (fallback)
+            if (!isBotMentioned) {
+                isBotMentioned = mentionedJids.some(jid => {
+                    const mentionedNumber = jid.split('@')[0].split(':')[0];
+                    const match = mentionedNumber === botPhoneNumber;
+                    if (mentionedJids.length > 0) {
+                        console.log(`Comparing: "${mentionedNumber}" === "${botPhoneNumber}" -> ${match}`);
+                    }
+                    return match;
+                });
+            }
 
             if (mentionedJids.length > 0) {
                 console.log('isBotMentioned:', isBotMentioned);
                 console.log('=== END DEBUG ===');
             }
-
-            const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
 
             // Record incoming message
             const recordedMessage = await MessageService.recordMessage({
