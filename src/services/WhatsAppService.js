@@ -72,7 +72,8 @@ class WhatsAppService {
             isConnected: false,
             state: 'disconnected',
             qr: null,
-            keepAliveTimer: null
+            keepAliveTimer: null,
+            botAlternativeJids: new Set() // Track alternative JIDs for bot (e.g., linked device IDs)
         };
 
         const sock = makeWASocket({
@@ -249,6 +250,13 @@ class WhatsAppService {
                 }
             }
 
+            // Get alternative bot JIDs from config and tracked JIDs
+            const configAltJids = process.env.BOT_ALTERNATIVE_JIDS
+                ? process.env.BOT_ALTERNATIVE_JIDS.split(',').map(j => j.trim())
+                : [];
+            const trackedAltJids = Array.from(session.botAlternativeJids || []);
+            const allBotJids = [...new Set([...botJidsInGroup, ...configAltJids, ...trackedAltJids])];
+
             // Debug logging for mention detection
             if (mentionedJids.length > 0) {
                 console.log('\n=== MENTION DETECTION DEBUG ===');
@@ -256,22 +264,27 @@ class WhatsAppService {
                 console.log('Bot Phone Number:', botPhoneNumber);
                 console.log('Is Linked Device:', sock.user.id.includes(':'));
                 console.log('Bot JIDs in Group:', botJidsInGroup);
+                console.log('Config Alternative JIDs:', configAltJids);
+                console.log('Tracked Alternative JIDs:', trackedAltJids);
+                console.log('All Bot JIDs (merged):', allBotJids);
                 console.log('All Participants in Group:', allParticipantJids);
                 console.log('\n--- Mentioned JIDs Analysis ---');
                 mentionedJids.forEach((jid, index) => {
                     const extractedNumber = jid.split('@')[0].split(':')[0];
                     const domain = jid.split('@')[1];
+                    const matchesAnyBotJid = allBotJids.includes(jid);
                     console.log(`[${index}] Raw: ${jid}`);
                     console.log(`    Number: ${extractedNumber}`);
                     console.log(`    Domain: ${domain}`);
-                    console.log(`    Matches Bot: ${extractedNumber === botPhoneNumber}`);
+                    console.log(`    Matches Bot Phone: ${extractedNumber === botPhoneNumber}`);
+                    console.log(`    Matches Any Bot JID: ${matchesAnyBotJid}`);
                 });
             }
 
             // Check if bot is mentioned
-            // Method 1: Direct JID match (including all bot JIDs in group)
-            let isBotMentioned = mentionedJids.some(jid => botJidsInGroup.includes(jid));
-            let detectionMethod = isBotMentioned ? 'Method 1: Direct JID match' : null;
+            // Method 1: Direct JID match (including all bot JIDs: group participants, config, and tracked)
+            let isBotMentioned = mentionedJids.some(jid => allBotJids.includes(jid));
+            let detectionMethod = isBotMentioned ? 'Method 1: Direct JID match (including alternatives)' : null;
 
             // Method 2: Phone number match (fallback for different JID formats)
             if (!isBotMentioned) {
@@ -475,6 +488,12 @@ class WhatsAppService {
 
         const result = await session.sock.sendMessage(phone, { text: message }, { quoted: quotedInfo });
 
+        // Track bot's alternative JID in group (for mention detection with linked devices)
+        if (phone.includes('@g.us') && result.key.participant) {
+            session.botAlternativeJids.add(result.key.participant);
+            console.log('📝 Tracked bot alternative JID:', result.key.participant);
+        }
+
         // Record outgoing message
         const recordedOutgoing = await MessageService.recordMessage({
             userId,
@@ -549,6 +568,12 @@ class WhatsAppService {
         }
 
         const result = await session.sock.sendMessage(groupJid, { text: message }, { quoted: quotedInfo });
+
+        // Track bot's alternative JID in group (for mention detection with linked devices)
+        if (result.key.participant) {
+            session.botAlternativeJids.add(result.key.participant);
+            console.log('📝 Tracked bot alternative JID:', result.key.participant);
+        }
 
         // Record outgoing group message
         const recordedOutgoing = await MessageService.recordMessage({

@@ -486,6 +486,68 @@ Detection Method: No match
 **Debug Lebih Lanjut:**
 Jika masih bermasalah, cek logs dan kirim output debug ke developer.
 
+### Bot Mention Tidak Terdeteksi (WhatsApp Business/Linked Device)
+
+**Masalah:**
+Bot di-tag di group tapi `isBotMentioned` tetap `false`.
+
+**Gejala di Logs:**
+```
+[0] Raw: 270776867536993@lid
+    Number: 270776867536993
+    Matches Bot Phone: false
+    Matches Any Bot JID: false
+
+isBotMentioned: false
+```
+
+**Penyebab:**
+WhatsApp Business atau Linked Device menggunakan JID internal yang berbeda dari nomor telepon bot. Contoh:
+- Nomor bot: `6287775760675`
+- Mentioned JID: `270776867536993@lid` (ID internal WhatsApp, bukan nomor telepon!)
+
+**Solusi 1: Auto-Detection (Recommended)**
+
+Sistem akan otomatis track JID bot saat bot kirim pesan ke group:
+
+1. Bot kirim pesan ke group (via dashboard atau API)
+2. Sistem track JID yang terlihat member lain
+3. JID ini otomatis disimpan untuk deteksi mention
+4. Cek logs: `📝 Tracked bot alternative JID: 270776867536993@lid`
+
+**Solusi 2: Manual Configuration**
+
+Jika auto-detection tidak bekerja, set manual di `.env`:
+
+1. Tag bot di group dan cek logs
+2. Lihat di `Mentioned JIDs Analysis`, copy JID mentah
+3. Tambahkan ke `.env`:
+   ```bash
+   BOT_ALTERNATIVE_JIDS=270776867536993@lid
+   ```
+4. Restart WhatsApp Gateway
+5. Test lagi mention bot
+
+**Multiple JIDs:**
+Jika bot punya beberapa JID berbeda di berbagai group:
+```bash
+BOT_ALTERNATIVE_JIDS=270776867536993@lid,123456789@lid,987654321@lid
+```
+
+**Verifikasi:**
+Setelah config, cek logs saat tag bot:
+```
+Config Alternative JIDs: [ '270776867536993@lid' ]
+Tracked Alternative JIDs: [ '270776867536993@lid' ]
+All Bot JIDs (merged): [ '6287775760675:10@s.whatsapp.net', '270776867536993@lid' ]
+
+[0] Raw: 270776867536993@lid
+    Matches Any Bot JID: true ✅
+
+isBotMentioned: true ✅
+Detection Method: Method 1: Direct JID match (including alternatives)
+```
+
 ---
 
 ## 📚 API Reference
