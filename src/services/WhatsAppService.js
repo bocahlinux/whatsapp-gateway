@@ -72,7 +72,8 @@ class WhatsAppService {
             isConnected: false,
             state: 'disconnected',
             qr: null,
-            keepAliveTimer: null
+            keepAliveTimer: null,
+            botAlternativeJids: new Set() // Track alternative JIDs for bot (e.g., linked device IDs)
         };
 
         const sock = makeWASocket({
@@ -187,7 +188,10 @@ class WhatsAppService {
      */
     async handleIncomingMessage(messageUpdate, userId, sock) {
         const message = messageUpdate.messages[0];
-        
+
+        // Get session to access botAlternativeJids
+        const session = this.sessions.get(String(userId));
+
         if (!message.key.fromMe && messageUpdate.type === 'notify') {
             const messageText = message.message?.conversation || 
                              message.message?.extendedTextMessage?.text || '';
@@ -197,19 +201,141 @@ class WhatsAppService {
             let quotedText = null;
             let quotedSender = null;
             let replyToId = null;
-            
+
             if (contextInfo?.quotedMessage) {
-                quotedText = contextInfo.quotedMessage.conversation || 
+                quotedText = contextInfo.quotedMessage.conversation ||
                            contextInfo.quotedMessage.extendedTextMessage?.text || '...';
                 quotedSender = contextInfo.participant;
-                
+
                 // Find the original message ID in database
                 const repliedToMsg = await Message.findOne({
                     stanzaId: contextInfo.stanzaId,
                     userId: userId
                 });
-                
+
                 if (repliedToMsg) replyToId = repliedToMsg._id;
+            }
+
+            // Handle mentions
+            const mentionedJids = contextInfo?.mentionedJid || [];
+            const isGroupMessage = message.key.remoteJid.endsWith('@g.us');
+
+            // Extract bot phone number (without suffix)
+            const botPhoneNumber = sock.user.id.split('@')[0].split(':')[0];
+
+            // For group messages, also check group participants to find bot's JID in group
+            let botJidsInGroup = [sock.user.id];
+            let allParticipantJids = [];
+            if (isGroupMessage) {
+                try {
+                    const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
+
+                    // Store all participant JIDs for debugging
+                    allParticipantJids = groupMetadata.participants.map(p => ({
+                        id: p.id,
+                        number: p.id.split('@')[0].split(':')[0]
+                    }));
+
+                    // Find all JIDs that match bot phone number
+                    botJidsInGroup = groupMetadata.participants
+                        .filter(p => {
+                            const participantNumber = p.id.split('@')[0].split(':')[0];
+                            return participantNumber === botPhoneNumber;
+                        })
+                        .map(p => p.id);
+
+                    // If not found, add bot's current JID as fallback
+                    if (botJidsInGroup.length === 0) {
+                        botJidsInGroup = [sock.user.id];
+                    }
+                } catch (error) {
+                    console.log('Could not fetch group metadata for mention check:', error.message);
+                }
+            }
+
+            // Get alternative bot JIDs from config and tracked JIDs
+            const configAltJids = process.env.BOT_ALTERNATIVE_JIDS
+                ? process.env.BOT_ALTERNATIVE_JIDS.split(',').map(j => j.trim())
+                : [];
+            const trackedAltJids = Array.from(session.botAlternativeJids || []);
+            const allBotJids = [...new Set([...botJidsInGroup, ...configAltJids, ...trackedAltJids])];
+
+            // Debug logging for mention detection
+            if (mentionedJids.length > 0) {
+                console.log('\n=== MENTION DETECTION DEBUG ===');
+                console.log('Bot JID:', sock.user.id);
+                console.log('Bot Phone Number:', botPhoneNumber);
+                console.log('Is Linked Device:', sock.user.id.includes(':'));
+                console.log('Bot JIDs in Group:', botJidsInGroup);
+                console.log('Config Alternative JIDs:', configAltJids);
+                console.log('Tracked Alternative JIDs:', trackedAltJids);
+                console.log('All Bot JIDs (merged):', allBotJids);
+                console.log('All Participants in Group:', allParticipantJids);
+                console.log('\n--- Mentioned JIDs Analysis ---');
+                mentionedJids.forEach((jid, index) => {
+                    const extractedNumber = jid.split('@')[0].split(':')[0];
+                    const domain = jid.split('@')[1];
+                    const matchesAnyBotJid = allBotJids.includes(jid);
+                    console.log(`[${index}] Raw: ${jid}`);
+                    console.log(`    Number: ${extractedNumber}`);
+                    console.log(`    Domain: ${domain}`);
+                    console.log(`    Matches Bot Phone: ${extractedNumber === botPhoneNumber}`);
+                    console.log(`    Matches Any Bot JID: ${matchesAnyBotJid}`);
+                });
+            }
+
+            // Check if bot is mentioned
+            // Method 1: Direct JID match (including all bot JIDs: group participants, config, and tracked)
+            let isBotMentioned = mentionedJids.some(jid => allBotJids.includes(jid));
+            let detectionMethod = isBotMentioned ? 'Method 1: Direct JID match (including alternatives)' : null;
+
+            // Method 2: Phone number match (fallback for different JID formats)
+            if (!isBotMentioned) {
+                isBotMentioned = mentionedJids.some(jid => {
+                    const mentionedNumber = jid.split('@')[0].split(':')[0];
+                    return mentionedNumber === botPhoneNumber;
+                });
+                if (isBotMentioned) detectionMethod = 'Method 2: Phone number match';
+            }
+
+            // Method 3: Check if this is a reply to bot's message
+            if (!isBotMentioned && quotedSender) {
+                const quotedNumber = quotedSender.split('@')[0].split(':')[0];
+                if (quotedNumber === botPhoneNumber) {
+                    isBotMentioned = true;
+                    detectionMethod = 'Method 3: Reply to bot message';
+                }
+            }
+
+            // Method 4: Force detection for linked devices (WORKAROUND for Baileys bug)
+            // More lenient matching for linked devices where standard detection fails
+            if (!isBotMentioned && isGroupMessage && mentionedJids.length > 0 && sock.user.id.includes(':')) {
+                // This is a workaround for linked device limitation in Baileys
+                // Enable by setting FORCE_MENTION_DETECTION=true in .env
+                const forceMentionDetection = process.env.FORCE_MENTION_DETECTION === 'true';
+                if (forceMentionDetection) {
+                    // Check if any mentioned JID contains the bot's phone number
+                    // This handles cases where JID format is unexpected (e.g., @lid format)
+                    isBotMentioned = mentionedJids.some(jid => {
+                        const mentionedNumber = jid.split('@')[0].split(':')[0];
+                        const match = mentionedNumber === botPhoneNumber;
+                        if (match) {
+                            console.log(`Method 4 matched: "${mentionedNumber}" === "${botPhoneNumber}"`);
+                        }
+                        return match;
+                    });
+
+                    if (isBotMentioned) {
+                        detectionMethod = 'Method 4: Force detection (linked device workaround)';
+                    }
+                }
+            }
+
+            if (mentionedJids.length > 0) {
+                console.log('\n--- Detection Result ---');
+                console.log('isBotMentioned:', isBotMentioned);
+                console.log('Detection Method:', detectionMethod || 'No match');
+                console.log('=== END DEBUG ===\n');
             }
 
             // Record incoming message
@@ -225,15 +351,20 @@ class WhatsAppService {
                 rawMessage: message.message,
                 replyToId: replyToId,
                 quotedText: quotedText,
-                quotedSender: quotedSender
+                quotedSender: quotedSender,
+                isMention: isBotMentioned,
+                mentionedJids: mentionedJids
             });
 
             if (recordedMessage) {
                 this.io.to(userId).emit('new_message', {
                     ...recordedMessage.toObject(),
                     id: recordedMessage._id,
-                    chat_jid: recordedMessage.chatJid
+                    chat_jid: recordedMessage.chatJid,
+                    is_mention: isBotMentioned
                 });
+
+                // Send webhook for regular message
                 if (this.webhookService && this.appSettings.webhook_toggle_message_in !== 'false') {
                     this.webhookService.send('message.in', {
                         userId,
@@ -241,33 +372,59 @@ class WhatsAppService {
                         chatJid: recordedMessage.chatJid,
                         sender: recordedMessage.sender,
                         text: recordedMessage.message,
-                        timestamp: recordedMessage.timestamp
+                        timestamp: recordedMessage.timestamp,
+                        isMention: isBotMentioned,
+                        mentionedJids: mentionedJids
                     });
+                }
+
+                // Send special webhook event if bot is mentioned in group
+                if (isBotMentioned && isGroupMessage) {
+                    if (this.webhookService && this.appSettings.webhook_toggle_message_in !== 'false') {
+                        this.webhookService.send('mention', {
+                            userId,
+                            id: recordedMessage._id,
+                            chatJid: recordedMessage.chatJid,
+                            groupName: message.key.remoteJid,
+                            sender: recordedMessage.sender,
+                            senderJid: recordedMessage.senderJid,
+                            text: recordedMessage.message,
+                            timestamp: recordedMessage.timestamp,
+                            isBotMentioned: true,
+                            mentionedJids: mentionedJids
+                        });
+                    }
                 }
             }
 
-            // Handle auto-reply
-            await this.handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender);
+            // Handle auto-reply (including mention-specific replies)
+            await this.handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender, isBotMentioned, isGroupMessage);
         }
     }
 
     /**
      * Handle auto-reply logic
      */
-    async handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender) {
+    async handleAutoReply(messageText, message, userId, sock, replyToId, quotedText, quotedSender, isBotMentioned = false, isGroupMessage = false) {
         const autoReplyEnabled = this.appSettings.auto_reply_enabled !== 'false';
-        
-        if (autoReplyEnabled && !message.key.remoteJid.endsWith('@g.us') && messageText) {
+
+        // Auto-reply conditions:
+        // 1. For private messages (NOT group): reply if keyword matches
+        // 2. For group messages: ONLY reply if bot is mentioned AND keyword matches
+        const shouldProcessAutoReply = autoReplyEnabled && messageText &&
+            (!isGroupMessage || (isGroupMessage && isBotMentioned));
+
+        if (shouldProcessAutoReply) {
             const lowerText = messageText.trim().toLowerCase();
-            const rule = this.autoReplies.find(r => 
-                r.enabled && 
+            const rule = this.autoReplies.find(r =>
+                r.enabled &&
                 lowerText.includes(String(r.keyword || '').toLowerCase().trim())
             );
-            
+
             if (rule) {
                 try {
                     const result = await sock.sendMessage(message.key.remoteJid, { text: rule.reply });
-                    
+
                     // Record auto-reply message
                     const recordedReply = await MessageService.recordMessage({
                         userId,
@@ -349,6 +506,12 @@ class WhatsAppService {
 
         const result = await session.sock.sendMessage(phone, { text: message }, { quoted: quotedInfo });
 
+        // Track bot's alternative JID in group (for mention detection with linked devices)
+        if (phone.includes('@g.us') && result.key.participant) {
+            session.botAlternativeJids.add(result.key.participant);
+            console.log('📝 Tracked bot alternative JID:', result.key.participant);
+        }
+
         // Record outgoing message
         const recordedOutgoing = await MessageService.recordMessage({
             userId,
@@ -424,6 +587,12 @@ class WhatsAppService {
 
         const result = await session.sock.sendMessage(groupJid, { text: message }, { quoted: quotedInfo });
 
+        // Track bot's alternative JID in group (for mention detection with linked devices)
+        if (result.key.participant) {
+            session.botAlternativeJids.add(result.key.participant);
+            console.log('📝 Tracked bot alternative JID:', result.key.participant);
+        }
+
         // Record outgoing group message
         const recordedOutgoing = await MessageService.recordMessage({
             userId,
@@ -498,12 +667,47 @@ class WhatsAppService {
         if (!session) {
             return { status: 'disconnected', connected: false, qr: null };
         }
-        
+
         return {
             status: session.state,
             connected: session.isConnected,
             qr: session.qr
         };
+    }
+
+    /**
+     * Get list of groups the user is part of
+     */
+    async getGroups(userId) {
+        const session = await this.ensureSession(userId);
+
+        if (!session.isConnected) {
+            throw new Error('WhatsApp not connected');
+        }
+
+        try {
+            // Get all groups from Baileys
+            const groups = await session.sock.groupFetchAllParticipating();
+
+            // Transform to array with useful information
+            const groupList = Object.values(groups).map(group => ({
+                id: group.id,
+                name: group.subject,
+                description: group.desc || '',
+                owner: group.owner,
+                participants: group.participants?.length || 0,
+                creation: group.creation,
+                participantsList: group.participants || []
+            }));
+
+            // Sort by name
+            groupList.sort((a, b) => a.name.localeCompare(b.name));
+
+            return groupList;
+        } catch (error) {
+            console.error('Error fetching groups:', error);
+            throw new Error('Failed to fetch groups: ' + error.message);
+        }
     }
 
     /**

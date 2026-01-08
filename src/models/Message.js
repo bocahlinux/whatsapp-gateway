@@ -44,6 +44,14 @@ const messageSchema = new mongoose.Schema({
   },
   quotedSender: {
     type: String
+  },
+  isMention: {
+    type: Boolean,
+    default: false
+  },
+  mentionedJids: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: { createdAt: true, updatedAt: false }

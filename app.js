@@ -35,6 +35,7 @@ import autoReplyRoutes from './src/routes/autoReply.js';
 import apiKeyRoutes from './src/routes/apiKeys.js';
 import settingsRoutes from './src/routes/settings.js';
 import userRoutes from './src/routes/users.js';
+import groupRoutes from './src/routes/groups.js';
 
 // Import utilities
 import { info, error as _error, warn } from './src/utils/logger.js';
@@ -205,6 +206,9 @@ class Application {
         
         // User management routes
         this.app.use('/users', userRoutes);
+
+        // Groups routes
+        this.app.use('/', groupRoutes);
 
         info('Routes configured');
     }
