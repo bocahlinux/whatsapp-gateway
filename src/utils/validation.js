@@ -206,6 +206,32 @@ function validateGroupMessageRequest(body) {
     };
 }
 
+/**
+ * Validate typing status request
+ */
+function validateTypingStatusRequest(body) {
+    const { to, status } = body;
+    const errors = [];
+
+    if (!to || typeof to !== 'string' || to.trim().length === 0) {
+        errors.push('Field "to" is required and must be a non-empty string');
+    }
+
+    if (!status || typeof status !== 'string' || status.trim().length === 0) {
+        errors.push('Field "status" is required and must be a non-empty string');
+    }
+
+    const allowedStatuses = ['composing', 'paused'];
+    if (status && !allowedStatuses.includes(status)) {
+        errors.push('Field "status" must be one of: composing, paused');
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+}
+
 export {
     validateSendMessageRequest,
     validateBulkMessageRequest,
@@ -213,5 +239,6 @@ export {
     validateAutoReplyData,
     validateRegistrationData,
     validateLoginData,
-    validateGroupMessageRequest
+    validateGroupMessageRequest,
+    validateTypingStatusRequest
 };

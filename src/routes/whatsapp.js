@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { isAuthenticatedOrApiKey, getEffectiveUserId, isAuthenticated } from '../middleware/auth.js';
 import ContactService from '../services/ContactService.js';
 import MessageService from '../services/MessageService.js';
-import { validateGroupMessageRequest } from '../utils/validation.js';
+import { validateGroupMessageRequest, validateTypingStatusRequest } from '../utils/validation.js';
 
 const router = Router();
 
@@ -20,6 +20,38 @@ router.get('/status', isAuthenticatedOrApiKey, async (req, res) => {
         res.status(500).json({
             error: 'internal_error',
             message: error.message
+        });
+    }
+});
+
+// Send typing status update
+router.post('/typing-status', isAuthenticatedOrApiKey, async (req, res) => {
+    const validation = validateTypingStatusRequest(req.body);
+    if (!validation.isValid) {
+        return res.status(400).json({
+            error: 'Validation failed',
+            details: validation.errors
+        });
+    }
+
+    const { to, status } = req.body;
+
+    try {
+        const userId = getEffectiveUserId(req);
+        const whatsappService = req.app.get('whatsappService');
+
+        await whatsappService.sendTypingStatus(userId, to, status);
+
+        res.json({
+            success: true,
+            to,
+            status
+        });
+    } catch (error) {
+        console.error('Error sending typing status:', error);
+        res.status(500).json({
+            error: 'Failed to send typing status',
+            details: error.message
         });
     }
 });

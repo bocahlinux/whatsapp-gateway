@@ -299,6 +299,20 @@ class WhatsAppService {
     }
 
     /**
+     * Send typing status update
+     */
+    async sendTypingStatus(userId, to, status = 'composing') {
+        const session = await this.ensureSession(userId);
+
+        if (!session.isConnected) {
+            throw new Error('WhatsApp not connected');
+        }
+
+        const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+        await session.sock.sendPresenceUpdate(status, jid);
+    }
+    
+    /**
      * Send a message via WhatsApp
      */
     async sendMessage(userId, to, message, replyToId = null) {
