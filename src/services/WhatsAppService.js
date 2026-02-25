@@ -254,7 +254,10 @@ class WhatsAppService {
                text.includes('EAI_AGAIN') ||
                text.includes('ENOTFOUND') ||
                text.includes('ECONNRESET') ||
-               text.includes('ETIMEDOUT');
+               text.includes('ETIMEDOUT') ||
+               text.includes('GETADDRINFO') ||
+               text.includes('WEBSOCKET ERROR') ||
+               text.includes('CONNECTION FAILURE');
     }
 
     /**
