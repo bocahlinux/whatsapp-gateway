@@ -15,7 +15,9 @@ class WhatsAppService {
     constructor(io) {
         this.io = io;
         this.sessions = new Map(); // userId => session object
+        this.pendingSessionPromises = new Map(); // userId => in-flight session creation promise
         this.reconnectAttempts = new Map(); // userId => retry count
+        this.reconnectTimers = new Map(); // userId => scheduled reconnect timer
         this.appSettings = {};
         this.autoReplies = [];
         this.webhookService = null;
@@ -57,6 +59,10 @@ class WhatsAppService {
             return this.sessions.get(userIdStr);
         }
 
+        if (this.pendingSessionPromises.has(userIdStr)) {
+            return await this.pendingSessionPromises.get(userIdStr);
+        }
+
         return await this.createSession(userIdStr, phoneNumber);
     }
 
@@ -65,30 +71,54 @@ class WhatsAppService {
      */
     async createSession(userId, phoneNumber = null) {
         const userIdStr = String(userId);
-        const authDir = join(__dirname, '../../auth_info_baileys', userIdStr);
-        const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-        const session = {
-            sock: null,
-            isConnected: false,
-            state: 'disconnected',
-            qr: null,
-            keepAliveTimer: null
-        };
+        if (this.sessions.has(userIdStr)) {
+            return this.sessions.get(userIdStr);
+        }
 
-        const sock = makeWASocket({
-            auth: state,
-            printQRInTerminal: false,
-            browser: ['WhatsApp API', 'Chrome', '1.0.0'],
-            keepAliveIntervalMs: config.whatsapp.keepAliveIntervalMs,
-            markOnlineOnConnect: config.whatsapp.markOnlineOnConnect
-        });
+        if (this.pendingSessionPromises.has(userIdStr)) {
+            return await this.pendingSessionPromises.get(userIdStr);
+        }
 
-        session.sock = sock;
-        this.setupSessionHandlers(session, userIdStr, saveCreds, authDir);
-        this.sessions.set(userIdStr, session);
+        if (this.reconnectTimers.has(userIdStr)) {
+            clearTimeout(this.reconnectTimers.get(userIdStr));
+            this.reconnectTimers.delete(userIdStr);
+        }
 
-        return session;
+        const createPromise = (async () => {
+            const authDir = join(__dirname, '../../auth_info_baileys', userIdStr);
+            const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+            const session = {
+                sock: null,
+                isConnected: false,
+                state: 'disconnected',
+                qr: null,
+                keepAliveTimer: null,
+                intentionalLogout: false
+            };
+
+            const sock = makeWASocket({
+                auth: state,
+                printQRInTerminal: false,
+                browser: ['WhatsApp API', 'Chrome', '1.0.0'],
+                keepAliveIntervalMs: config.whatsapp.keepAliveIntervalMs,
+                markOnlineOnConnect: config.whatsapp.markOnlineOnConnect
+            });
+
+            session.sock = sock;
+            this.setupSessionHandlers(session, userIdStr, saveCreds, authDir);
+            this.sessions.set(userIdStr, session);
+
+            return session;
+        })();
+
+        this.pendingSessionPromises.set(userIdStr, createPromise);
+        try {
+            return await createPromise;
+        } finally {
+            this.pendingSessionPromises.delete(userIdStr);
+        }
     }
 
     /**
@@ -165,7 +195,7 @@ class WhatsAppService {
             const code = lastDisconnect?.error?.output?.statusCode ||
                          lastDisconnect?.error?.statusCode ||
                          lastDisconnect?.error?.data;
-            const loggedOut = code === DisconnectReason.loggedOut;
+            const loggedOut = code === DisconnectReason.loggedOut || session.intentionalLogout;
             const disconnectMessage = this.getDisconnectMessage(lastDisconnect?.error);
             console.warn(`WhatsApp disconnected for user ${userId}. Code: ${code || 'unknown'}. Reason: ${disconnectMessage}`);
             
@@ -185,9 +215,20 @@ class WhatsAppService {
                 this.reconnectAttempts.set(userId, retryCount);
                 const reconnectDelay = Math.min(1000 * (2 ** Math.min(retryCount - 1, 4)), 30000);
                 console.log(`Scheduling reconnect for user ${userId} in ${reconnectDelay}ms (attempt ${retryCount})`);
-                setTimeout(() => this.createSession(userId), reconnectDelay);
+                if (this.reconnectTimers.has(userId)) {
+                    clearTimeout(this.reconnectTimers.get(userId));
+                }
+                const reconnectTimer = setTimeout(() => {
+                    this.reconnectTimers.delete(userId);
+                    this.createSession(userId);
+                }, reconnectDelay);
+                this.reconnectTimers.set(userId, reconnectTimer);
             } else {
                 this.reconnectAttempts.delete(userId);
+                if (this.reconnectTimers.has(userId)) {
+                    clearTimeout(this.reconnectTimers.get(userId));
+                    this.reconnectTimers.delete(userId);
+                }
                 console.log('Intentional logout detected; skipping auto-reconnect.');
             }
         }
@@ -477,6 +518,8 @@ class WhatsAppService {
         const session = this.sessions.get(userIdStr);
         if (!session) return;
 
+        session.intentionalLogout = true;
+
         try {
             await session.sock.logout();
         } catch (error) {
@@ -487,7 +530,12 @@ class WhatsAppService {
             clearInterval(session.keepAliveTimer);
         }
         this.sessions.delete(userIdStr);
+        this.pendingSessionPromises.delete(userIdStr);
         this.reconnectAttempts.delete(userIdStr);
+        if (this.reconnectTimers.has(userIdStr)) {
+            clearTimeout(this.reconnectTimers.get(userIdStr));
+            this.reconnectTimers.delete(userIdStr);
+        }
 
         const authDir = join(__dirname, '../../auth_info_baileys', userIdStr);
         try {
