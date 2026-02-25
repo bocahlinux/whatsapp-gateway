@@ -18,6 +18,7 @@ class WhatsAppService {
         this.pendingSessionPromises = new Map(); // userId => in-flight session creation promise
         this.reconnectAttempts = new Map(); // userId => retry count
         this.reconnectTimers = new Map(); // userId => scheduled reconnect timer
+        this.lastDisconnectReasons = new Map(); // userId => last readable disconnect reason
         this.appSettings = {};
         this.autoReplies = [];
         this.webhookService = null;
@@ -172,6 +173,7 @@ class WhatsAppService {
             session.state = 'connected';
             session.qr = null;
             this.reconnectAttempts.set(userId, 0);
+            this.lastDisconnectReasons.delete(userId);
             this.io.to(userId).emit('connection_status', { status: 'connected' });
             console.log(`WhatsApp connected for user: ${userId}`);
             if (this.webhookService && this.appSettings.webhook_toggle_connection !== 'false') {
@@ -197,7 +199,13 @@ class WhatsAppService {
                          lastDisconnect?.error?.data;
             const loggedOut = code === DisconnectReason.loggedOut || session.intentionalLogout;
             const disconnectMessage = this.getDisconnectMessage(lastDisconnect?.error);
+            const networkIssue = this.isNetworkDisconnect(code, disconnectMessage);
+            this.lastDisconnectReasons.set(userId, disconnectMessage);
             console.warn(`WhatsApp disconnected for user ${userId}. Code: ${code || 'unknown'}. Reason: ${disconnectMessage}`);
+            if (networkIssue) {
+                session.state = 'network_error';
+                this.io.to(userId).emit('connection_status', { status: 'network_error', reason: disconnectMessage });
+            }
             
             if (loggedOut) {
                 try {
@@ -213,7 +221,9 @@ class WhatsAppService {
             if (!loggedOut) {
                 const retryCount = (this.reconnectAttempts.get(userId) || 0) + 1;
                 this.reconnectAttempts.set(userId, retryCount);
-                const reconnectDelay = Math.min(1000 * (2 ** Math.min(retryCount - 1, 4)), 30000);
+                const reconnectDelay = networkIssue
+                    ? Math.min(10000 * retryCount, 60000)
+                    : Math.min(1000 * (2 ** Math.min(retryCount - 1, 4)), 30000);
                 console.log(`Scheduling reconnect for user ${userId} in ${reconnectDelay}ms (attempt ${retryCount})`);
                 if (this.reconnectTimers.has(userId)) {
                     clearTimeout(this.reconnectTimers.get(userId));
@@ -232,6 +242,19 @@ class WhatsAppService {
                 console.log('Intentional logout detected; skipping auto-reconnect.');
             }
         }
+    }
+
+    /**
+     * Detect transient network / DNS related disconnects
+     */
+    isNetworkDisconnect(code, reason = '') {
+        const text = String(reason || '').toUpperCase();
+        return code === DisconnectReason.connectionLost ||
+               code === DisconnectReason.connectionClosed ||
+               text.includes('EAI_AGAIN') ||
+               text.includes('ENOTFOUND') ||
+               text.includes('ECONNRESET') ||
+               text.includes('ETIMEDOUT');
     }
 
     /**
@@ -532,6 +555,7 @@ class WhatsAppService {
         this.sessions.delete(userIdStr);
         this.pendingSessionPromises.delete(userIdStr);
         this.reconnectAttempts.delete(userIdStr);
+        this.lastDisconnectReasons.delete(userIdStr);
         if (this.reconnectTimers.has(userIdStr)) {
             clearTimeout(this.reconnectTimers.get(userIdStr));
             this.reconnectTimers.delete(userIdStr);
@@ -553,13 +577,19 @@ class WhatsAppService {
     getSessionStatus(userId) {
         const session = this.sessions.get(String(userId));
         if (!session) {
-            return { status: 'disconnected', connected: false, qr: null };
+            return {
+                status: 'disconnected',
+                connected: false,
+                qr: null,
+                reason: this.lastDisconnectReasons.get(String(userId)) || null
+            };
         }
         
         return {
             status: session.state,
             connected: session.isConnected,
-            qr: session.qr
+            qr: session.qr,
+            reason: this.lastDisconnectReasons.get(String(userId)) || null
         };
     }
 
