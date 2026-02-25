@@ -182,7 +182,7 @@
 
     socket.on('connection_status', (data) => {
         console.log('Connection status:', data);
-        updateStatus(data.status);
+        updateStatus(data.status, data.reason);
     });
 
     socket.on('new_message', (message) => {
@@ -264,7 +264,7 @@
         }
     }
 
-    function updateStatus(status) {
+    function updateStatus(status, reason = null) {
         currentStatus = status;
 
         // Update status indicator and icon
@@ -296,11 +296,25 @@
                     testBtn.disabled = true;
                     waLogoutBtn.disabled = true;
                     break;
+                case 'network_error':
+                    statusElement.textContent = 'Gangguan Jaringan';
+                    statusElement.className = 'text-xl font-bold text-amber-600';
+                    statusMessageElement.textContent = reason
+                        ? `Koneksi ke WhatsApp terganggu: ${reason}`
+                        : 'Koneksi ke WhatsApp terganggu (DNS / internet VPS).';
+                    statusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 status-pulse';
+                    statusIcon.className = 'ri-wifi-off-line text-amber-600 text-xl';
+                    connectionCard.style.display = 'none';
+                    testBtn.disabled = true;
+                    waLogoutBtn.disabled = true;
+                    break;
                 case 'disconnected':
                 default:
                     statusElement.textContent = 'Terputus';
                     statusElement.className = 'text-xl font-bold text-red-600';
-                    statusMessageElement.textContent = 'WhatsApp belum terhubung.';
+                    statusMessageElement.textContent = reason
+                        ? `WhatsApp belum terhubung. Alasan terakhir: ${reason}`
+                        : 'WhatsApp belum terhubung.';
                     statusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
                     statusIcon.className = 'ri-close-circle-line text-red-600 text-xl';
                     connectionCard.style.display = 'none';
@@ -395,7 +409,7 @@
             const response = await fetch('/status');
             const data = await response.json();
 
-            updateStatus(data.status);
+            updateStatus(data.status, data.reason);
 
             if (data.qr) {
                 displayQR(data.qr);
