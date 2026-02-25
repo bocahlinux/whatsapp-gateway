@@ -15,6 +15,7 @@ class WhatsAppService {
     constructor(io) {
         this.io = io;
         this.sessions = new Map(); // userId => session object
+        this.reconnectAttempts = new Map(); // userId => retry count
         this.appSettings = {};
         this.autoReplies = [];
         this.webhookService = null;
@@ -140,6 +141,7 @@ class WhatsAppService {
             session.isConnected = true;
             session.state = 'connected';
             session.qr = null;
+            this.reconnectAttempts.set(userId, 0);
             this.io.to(userId).emit('connection_status', { status: 'connected' });
             console.log(`WhatsApp connected for user: ${userId}`);
             if (this.webhookService && this.appSettings.webhook_toggle_connection !== 'false') {
@@ -160,8 +162,12 @@ class WhatsAppService {
             }
             this.sessions.delete(userId);
 
-            const code = lastDisconnect?.error?.output?.statusCode;
+            const code = lastDisconnect?.error?.output?.statusCode ||
+                         lastDisconnect?.error?.statusCode ||
+                         lastDisconnect?.error?.data;
             const loggedOut = code === DisconnectReason.loggedOut;
+            const disconnectMessage = this.getDisconnectMessage(lastDisconnect?.error);
+            console.warn(`WhatsApp disconnected for user ${userId}. Code: ${code || 'unknown'}. Reason: ${disconnectMessage}`);
             
             if (loggedOut) {
                 try {
@@ -175,11 +181,27 @@ class WhatsAppService {
 
             // Reconnect after delay unless user intentionally logged out
             if (!loggedOut) {
-                setTimeout(() => this.createSession(userId), 1000);
+                const retryCount = (this.reconnectAttempts.get(userId) || 0) + 1;
+                this.reconnectAttempts.set(userId, retryCount);
+                const reconnectDelay = Math.min(1000 * (2 ** Math.min(retryCount - 1, 4)), 30000);
+                console.log(`Scheduling reconnect for user ${userId} in ${reconnectDelay}ms (attempt ${retryCount})`);
+                setTimeout(() => this.createSession(userId), reconnectDelay);
             } else {
+                this.reconnectAttempts.delete(userId);
                 console.log('Intentional logout detected; skipping auto-reconnect.');
             }
         }
+    }
+
+    /**
+     * Extract readable disconnect reason from Baileys error object
+     */
+    getDisconnectMessage(error) {
+        if (!error) return 'Unknown disconnect reason';
+        if (typeof error === 'string') return error;
+        if (error?.message) return error.message;
+        if (error?.data) return String(error.data);
+        return 'Unknown disconnect reason';
     }
 
     /**
@@ -465,6 +487,7 @@ class WhatsAppService {
             clearInterval(session.keepAliveTimer);
         }
         this.sessions.delete(userIdStr);
+        this.reconnectAttempts.delete(userIdStr);
 
         const authDir = join(__dirname, '../../auth_info_baileys', userIdStr);
         try {
